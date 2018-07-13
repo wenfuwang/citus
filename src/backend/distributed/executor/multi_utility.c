@@ -111,7 +111,6 @@ static bool IsCitusExtensionStmt(Node *parsetree);
 /* Local functions forward declarations for Transmit statement */
 static bool IsTransmitStmt(Node *parsetree);
 static void VerifyTransmitStmt(CopyStmt *copyStatement);
-static bool IsCopyResultStmt(CopyStmt *copyStatement);
 
 /* Local functions forward declarations for processing distributed table commands */
 static Node * ProcessCopyStmt(CopyStmt *copyStatement, char *completionTag,
@@ -792,34 +791,6 @@ VerifyTransmitStmt(CopyStmt *copyStatement)
 						errmsg("FORMAT 'transmit' does not accept query, attribute list"
 							   " or PROGRAM parameters ")));
 	}
-}
-
-
-/*
- * IsCopyResultStmt determines whether the given copy statement is a
- * COPY "resultkey" FROM STDIN WITH (format result) statement, which is used
- * to copy query results from the coordinator into workers.
- */
-static bool
-IsCopyResultStmt(CopyStmt *copyStatement)
-{
-	ListCell *optionCell = NULL;
-	bool hasFormatReceive = false;
-
-	/* extract WITH (...) options from the COPY statement */
-	foreach(optionCell, copyStatement->options)
-	{
-		DefElem *defel = (DefElem *) lfirst(optionCell);
-
-		if (strncmp(defel->defname, "format", NAMEDATALEN) == 0 &&
-			strncmp(defGetString(defel), "result", NAMEDATALEN) == 0)
-		{
-			hasFormatReceive = true;
-			break;
-		}
-	}
-
-	return hasFormatReceive;
 }
 
 
