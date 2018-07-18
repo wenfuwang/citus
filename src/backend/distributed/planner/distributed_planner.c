@@ -582,7 +582,7 @@ CreateDistributedPlan(uint64 planId, Query *originalQuery, Query *query, ParamLi
 		if (InsertSelectIntoDistributedTable(originalQuery))
 		{
 			distributedPlan =
-				CreateInsertSelectPlan(originalQuery, plannerRestrictionContext);
+				CreateInsertSelectPlan(planId, originalQuery, plannerRestrictionContext);
 		}
 		else
 		{
