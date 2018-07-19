@@ -425,6 +425,7 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 		case EXEC_TASK_FAILED:
 		{
 			bool raiseError = false;
+			bool isCritical = false;
 
 			/*
 			 * On task failure, we close the connection. We also reset our execution
@@ -433,21 +434,34 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 			 * on this node again.
 			 */
 			int32 connectionId = connectionIdArray[currentIndex];
-			MultiConnection *connection = MultiClientGetConnection(connectionId);
-			bool isCritical = connection->remoteTransaction.transactionCritical;
+			if (connectionId != INVALID_CONNECTION_ID)
+			{
+				MultiConnection *connection = MultiClientGetConnection(connectionId);
 
-			/*
-			 * Mark the connection as failed in case it was already used to perform
-			 * writes. We do not error out here, because the abort handler currently
-			 * cannot handle connections with COPY (SELECT ...) TO STDOUT commands
-			 * in progress.
-			 */
-			raiseError = false;
-			MarkRemoteTransactionFailed(connection, raiseError);
+				isCritical = connection->remoteTransaction.transactionCritical;
 
-			MultiClientDisconnect(connectionId);
-			connectionIdArray[currentIndex] = INVALID_CONNECTION_ID;
-			connectAction = CONNECT_ACTION_CLOSED;
+				/*
+				 * Mark the connection as failed in case it was already used to perform
+				 * writes. We do not error out here, because the abort handler currently
+				 * cannot handle connections with COPY (SELECT ...) TO STDOUT commands
+				 * in progress.
+				 */
+				raiseError = false;
+				MarkRemoteTransactionFailed(connection, raiseError);
+
+				MultiClientDisconnect(connectionId);
+				connectionIdArray[currentIndex] = INVALID_CONNECTION_ID;
+
+				connectAction = CONNECT_ACTION_CLOSED;
+			}
+			else
+			{
+				/*
+				 * The task failed before we even managed to connect. This happens when
+				 * the metadata is out of sync due to a rebalance. It may be that only
+				 * one placement was moved, in that case the other one might still work.
+				 */
+			}
 
 			taskStatusArray[currentIndex] = EXEC_TASK_CONNECT_START;
 
