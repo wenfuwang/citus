@@ -438,13 +438,25 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 
 			taskStatusArray[currentIndex] = EXEC_TASK_CONNECT_START;
 
+			/* try next worker node */
+			AdjustStateForFailure(taskExecution);
+
 			/*
 			 * Add a delay, to avoid potentially excerbating problems by
 			 * looping quickly
 			 */
 			*executionStatus = TASK_STATUS_ERROR;
 
-			if (connection != NULL)
+			if (connection == NULL)
+			{
+				/*
+				 * The task failed before we even managed to connect. This happens when
+				 * the metadata is out of sync due to a rebalance. It may be that only
+				 * one placement was moved, in that case the other one might still work.
+				 */
+				break;
+			}
+			else
 			{
 				isCritical = connection->remoteTransaction.transactionCritical;
 				if (isCritical)
@@ -467,17 +479,6 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 
 				connectAction = CONNECT_ACTION_CLOSED;
 			}
-			else
-			{
-				/*
-				 * The task failed before we even managed to connect. This happens when
-				 * the metadata is out of sync due to a rebalance. It may be that only
-				 * one placement was moved, in that case the other one might still work.
-				 */
-			}
-
-			/* try next worker node */
-			AdjustStateForFailure(taskExecution);
 
 			break;
 		}
