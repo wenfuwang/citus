@@ -435,6 +435,15 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 			 */
 			int32 connectionId = connectionIdArray[currentIndex];
 			MultiConnection *connection = MultiClientGetConnection(connectionId);
+
+			taskStatusArray[currentIndex] = EXEC_TASK_CONNECT_START;
+
+			/*
+			 * Add a delay, to avoid potentially excerbating problems by
+			 * looping quickly
+			 */
+			*executionStatus = TASK_STATUS_ERROR;
+
 			if (connection != NULL)
 			{
 				isCritical = connection->remoteTransaction.transactionCritical;
@@ -462,8 +471,6 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 				 */
 			}
 
-			taskStatusArray[currentIndex] = EXEC_TASK_CONNECT_START;
-
 			if (isCritical)
 			{
 				/* cannot recover when error occurs in a critical transaction */
@@ -474,13 +481,6 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 				/* try next worker node */
 				AdjustStateForFailure(taskExecution);
 			}
-
-			/*
-			 * Add a delay, to avoid potentially excerbating problems by
-			 * looping quickly
-			 */
-			*executionStatus = TASK_STATUS_ERROR;
-
 			break;
 		}
 
