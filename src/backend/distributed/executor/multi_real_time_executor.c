@@ -434,10 +434,9 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 			 * on this node again.
 			 */
 			int32 connectionId = connectionIdArray[currentIndex];
-			if (connectionId != INVALID_CONNECTION_ID)
+			MultiConnection *connection = MultiClientGetConnection(connectionId);
+			if (connection != NULL)
 			{
-				MultiConnection *connection = MultiClientGetConnection(connectionId);
-
 				isCritical = connection->remoteTransaction.transactionCritical;
 
 				/*
