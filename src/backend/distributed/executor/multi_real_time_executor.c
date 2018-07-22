@@ -447,6 +447,11 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 			if (connection != NULL)
 			{
 				isCritical = connection->remoteTransaction.transactionCritical;
+				if (isCritical)
+				{
+					/* cannot recover when error occurs in a critical transaction */
+					taskExecution->criticalErrorOccurred = true;
+				}
 
 				/*
 				 * Mark the connection as failed in case it was already used to perform
@@ -471,16 +476,9 @@ ManageTaskExecution(Task *task, TaskExecution *taskExecution,
 				 */
 			}
 
-			if (isCritical)
-			{
-				/* cannot recover when error occurs in a critical transaction */
-				taskExecution->criticalErrorOccurred = true;
-			}
-			else
-			{
-				/* try next worker node */
-				AdjustStateForFailure(taskExecution);
-			}
+			/* try next worker node */
+			AdjustStateForFailure(taskExecution);
+
 			break;
 		}
 
