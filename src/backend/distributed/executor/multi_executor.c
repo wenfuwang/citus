@@ -299,6 +299,7 @@ ExecutePlanIntoDestReceiver(PlannedStmt *queryPlan, ParamListInfo params,
 	PortalRun(portal, count, false, dest, dest, NULL);
 #endif
 	PortalDrop(portal, false);
+elog(NOTICE, "MultiShardConnectionType %d", MultiShardConnectionType);
 }
 
 

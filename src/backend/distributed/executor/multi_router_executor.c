@@ -665,6 +665,54 @@ TaskListRequires2PC(List *taskList)
 
 
 /*
+ * RouterModifyExecScan executes a list of tasks on remote nodes, retrieves
+ * the results and, if RETURNING is used, stores them in custom scan's tuple store.
+ * Then, it returns tuples one by one from this tuple store.
+ */
+TupleTableSlot *
+RouterModifyExecScan(CustomScanState *node)
+{
+	CitusScanState *scanState = (CitusScanState *) node;
+	TupleTableSlot *resultSlot = NULL;
+
+	if (!scanState->finishedRemoteScan)
+	{
+		DistributedPlan *distributedPlan = scanState->distributedPlan;
+		Job *workerJob = distributedPlan->workerJob;
+		List *taskList = workerJob->taskList;
+		bool hasReturning = distributedPlan->hasReturning;
+		bool isModificationQuery = true;
+
+		ExecuteSubplans();
+
+		if (list_length(taskList) <= 1 ||
+			IsMultiRowInsert(workerJob->jobQuery) ||
+			MultiShardConnectionType == SEQUENTIAL_CONNECTION)
+		{
+			parallelExecution = false;
+		}
+
+		if (parallelExecution)
+		{
+			RouterMultiModifyExecScan(scanState, taskList,
+											 isModificationQuery, hasReturning);
+		}
+		else
+		{
+			RouterSequentialModifyExecScan(scanState, taskList,
+										isModificationQuery, hasReturning);
+		}
+
+		scanState->finishedRemoteScan = true;
+	}
+
+	resultSlot = ReturnTupleFromTuplestore(scanState);
+
+	return resultSlot;
+}
+
+
+/*
  * RouterMultiModifyExecScan executes a list of tasks on remote nodes, retrieves
  * the results and, if RETURNING is used, stores them in custom scan's tuple store.
  * Then, it returns tuples one by one from this tuple store.

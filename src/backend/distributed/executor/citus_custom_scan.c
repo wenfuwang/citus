@@ -88,17 +88,8 @@ static CustomExecMethods TaskTrackerCustomExecMethods = {
 	.ExplainCustomScan = CitusExplainScan
 };
 
-static CustomExecMethods RouterSequentialModifyCustomExecMethods = {
-	.CustomName = "RouterSequentialModifyScan",
-	.BeginCustomScan = CitusModifyBeginScan,
-	.ExecCustomScan = RouterSequentialModifyExecScan,
-	.EndCustomScan = CitusEndScan,
-	.ReScanCustomScan = CitusReScan,
-	.ExplainCustomScan = CitusExplainScan
-};
-
-static CustomExecMethods RouterMultiModifyCustomExecMethods = {
-	.CustomName = "RouterMultiModifyScan",
+static CustomExecMethods RouterModifyCustomExecMethods = {
+	.CustomName = "RouterModifyScan",
 	.BeginCustomScan = CitusModifyBeginScan,
 	.ExecCustomScan = RouterMultiModifyExecScan,
 	.EndCustomScan = CitusEndScan,
@@ -210,7 +201,7 @@ RouterCreateScan(CustomScan *scan)
 		/* if query is SELECT ... FOR UPDATE query, use modify logic */
 		if (isModificationQuery || relationRowLockList != NIL)
 		{
-			scanState->customScanState.methods = &RouterSequentialModifyCustomExecMethods;
+			scanState->customScanState.methods = &RouterModifyCustomExecMethods;
 		}
 		else
 		{
@@ -229,11 +220,11 @@ RouterCreateScan(CustomScan *scan)
 			 * to 'sequential' or Multi-row INSERT are executed sequentially
 			 * instead of using parallel connections.
 			 */
-			scanState->customScanState.methods = &RouterSequentialModifyCustomExecMethods;
+			scanState->customScanState.methods = &RouterModifyCustomExecMethods;
 		}
 		else
 		{
-			scanState->customScanState.methods = &RouterMultiModifyCustomExecMethods;
+			scanState->customScanState.methods = &RouterModifyCustomExecMethods;
 		}
 	}
 
