@@ -105,6 +105,8 @@ CreateShardsWithRoundRobinPolicy(Oid distributedTableId, int32 shardCount,
 	DistTableCacheEntry *cacheEntry = DistributedTableCacheEntry(distributedTableId);
 	bool colocatedShard = false;
 	List *insertedShardPlacements = NIL;
+	List *workersWithoutMetadata = NIL;
+	ListCell *workerNodeCell = NULL;
 
 	/* make sure table is hash partitioned */
 	CheckHashPartitionedTable(distributedTableId);
@@ -168,6 +170,21 @@ CreateShardsWithRoundRobinPolicy(Oid distributedTableId, int32 shardCount,
 	/* load and sort the worker node list for deterministic placement */
 	workerNodeList = ActivePrimaryNodeList();
 	workerNodeList = SortList(workerNodeList, CompareWorkerNodes);
+
+	foreach(workerNodeCell, workerNodeList)
+	{
+		WorkerNode *workerNode = (WorkerNode *) lfirst(workerNodeCell);
+
+		if (workerNode->hasMetadata)
+		{
+			continue;
+		}
+
+		workersWithoutMetadata = lappend(workersWithoutMetadata, workerNode);
+	}
+
+	/* only use workers without metadata to create the shards */
+	workerNodeList = workersWithoutMetadata;
 
 	/* make sure we don't process cancel signals until all shards are created */
 	HOLD_INTERRUPTS();
