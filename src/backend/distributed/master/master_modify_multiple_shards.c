@@ -96,7 +96,7 @@ master_modify_multiple_shards(PG_FUNCTION_ARGS)
 	queryTreeNode = ParseTreeNode(queryString);
 #endif
 
-	EnsureCoordinator();
+	//EnsureCoordinator();
 	CheckCitusVersion(ERROR);
 
 
