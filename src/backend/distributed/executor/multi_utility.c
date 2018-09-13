@@ -228,6 +228,9 @@ CitusProcessUtility(Node *node, const char *queryString, ProcessUtilityContext c
 }
 
 
+static bool ShouldExecuteTruncateStmtSequential(TruncateStmt *command);
+static void AcquireLockForTruncate(const char *lockQuery, Oid relationId);
+
 /*
  * multi_ProcessUtility is the main entry hook for implementing Citus-specific
  * utility behavior. Its primary responsibilities are intercepting COPY and DDL
@@ -354,7 +357,83 @@ multi_ProcessUtility(PlannedStmt *pstmt,
 
 	if (IsA(parsetree, TruncateStmt))
 	{
+
+		/*
+		 * TODO: Move this logic to a sepeare function
+		 */
 		ErrorIfUnsupportedTruncateStmt((TruncateStmt *) parsetree);
+
+		TruncateStmt *truncateStatement = (TruncateStmt *) parsetree;
+		List *relationList = truncateStatement->relations;
+		elog(INFO, "list_len: %d", list_length(relationList));
+
+		RangeVar *rangeVar = NULL;
+
+		rangeVar = (RangeVar *) linitial(relationList);
+		Oid relationId = RangeVarGetRelid(rangeVar, NoLock, true);
+
+		if (EnableDDLPropagation && IsDistributedTable(relationId))
+		{
+			if (rangeVar->schemaname == NULL)
+			{
+				Oid schemaOid = get_rel_namespace(relationId);
+				char *schemaName = get_namespace_name(schemaOid);
+				rangeVar->schemaname = schemaName;
+			}
+
+
+			if (list_length(relationList) != 1)
+			{
+				/* TODO: error message doesn't make sense*/
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("master_modify_multiple_shards() can truncate only "
+								"one table")));
+			}
+
+
+			EnsureTablePermissions(relationId, ACL_TRUNCATE);
+
+			if (ShouldExecuteTruncateStmtSequential(truncateStatement))
+			{
+				SetLocalMultiShardModifyModeToSequential();
+			}
+
+			/*
+			 * We lock the relation we're TRUNCATING on the other worker nodes before
+			 * executing the truncate commands on the shards. This is necessary to prevent
+			 * distributed deadlocks where a concurrent operation on the same table (or a
+			 * cascading table) is executed on the other nodes.
+			 *
+			 * Note that we should skip the current node to prevent a self-deadlock that's why
+			 * we use OTHER_WORKERS tag.
+			 */
+			if (ShouldSyncTableMetadata(relationId))
+			{
+#define LOCK_RELATION_IF_EXISTS "SELECT lock_relation_if_exists('%s', '%s');"
+#define REMOTE_LOCK_MODE_FOR_TRUNCATE "ACCESS EXCLUSIVE"
+				char *qualifiedRelationName =
+					generate_qualified_relation_name(relationId);
+				StringInfo lockRelation = makeStringInfo();
+
+				appendStringInfo(lockRelation, LOCK_RELATION_IF_EXISTS,
+								 qualifiedRelationName,
+								 REMOTE_LOCK_MODE_FOR_TRUNCATE);
+
+				AcquireLockForTruncate(lockRelation->data, relationId);
+			}
+
+			List *taskList =
+				DDLTaskList(relationId, queryString);
+
+			DDLJob *ddlJob = palloc0(sizeof(DDLJob));
+			ddlJob->targetRelationId = relationId;
+			ddlJob->commandString = queryString;
+			ddlJob->taskList = taskList;
+			ddlJob->truncateStatment = true;
+
+			ddlJobs = list_make1(ddlJob);
+		}
 	}
 
 	/* only generate worker DDLJobs if propagation is enabled */
@@ -713,6 +792,72 @@ multi_ProcessUtility(PlannedStmt *pstmt,
 	 * EXTENSION. This is important to register some invalidation callbacks.
 	 */
 	CitusHasBeenLoaded();
+}
+
+
+#include "distributed/remote_commands.h"
+#include "distributed/listutils.h"
+
+/*
+ * TODO: name of the function doesn't make a lot of sense.
+ */
+static void
+AcquireLockForTruncate(const char *lockQuery, Oid relationId)
+{
+	List *workerNodeList = ActivePrimaryNodeList();
+	ListCell *workerNodeCell = NULL;
+	char *nodeUser = CurrentUserName();
+	List *connectionList = NIL;
+	ListCell *connectionCell = NULL;
+
+	BeginOrContinueCoordinatedTransaction();
+	CoordinatedTransactionUse2PC();
+
+	workerNodeList = SortList(workerNodeList, CompareWorkerNodes);
+
+	/* open connections in parallel */
+	foreach(workerNodeCell, workerNodeList)
+	{
+		WorkerNode *workerNode = (WorkerNode *) lfirst(workerNodeCell);
+		char *nodeName = workerNode->workerName;
+		int nodePort = workerNode->workerPort;
+		MultiConnection *connection = NULL;
+		int connectionFlags = 0;
+
+		if (workerNode->groupId == GetLocalGroupId())
+		{
+			/* TODO: pass the lockMode to this function and generate lockQuery here */
+			LockRelationOid(relationId, AccessExclusiveLock);
+
+			continue;
+		}
+
+		SendCommandToWorker(nodeName, nodePort, lockQuery);
+	}
+}
+
+
+static bool
+ShouldExecuteTruncateStmtSequential(TruncateStmt *command)
+{
+	List *relationList = command->relations;
+	ListCell *relationCell = NULL;
+	bool failOK = false;
+
+	foreach(relationCell, relationList)
+	{
+		RangeVar *rangeVar = (RangeVar *) lfirst(relationCell);
+		Oid relationId = RangeVarGetRelid(rangeVar, NoLock, failOK);
+
+		if (IsDistributedTable(relationId) &&
+			PartitionMethod(relationId) == DISTRIBUTE_BY_NONE &&
+			TableReferenced(relationId))
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 
@@ -3142,15 +3287,31 @@ ExecuteDistributedDDLJob(DDLJob *ddlJob)
 {
 	bool shouldSyncMetadata = ShouldSyncTableMetadata(ddlJob->targetRelationId);
 
-	EnsureCoordinator();
+	if (!ddlJob->truncateStatment)
+	{
+		EnsureCoordinator();
+	}
 
 	if (!ddlJob->concurrentIndexCmd)
 	{
+		/*
+		 * TODO: move this logic to a seperate function. Also, we have the same
+		 * code duplicate below.
+		 */
 		if (shouldSyncMetadata)
 		{
 			char *setSearchPathCommand = SetSearchPathToCurrentSearchPathCommand();
+			TargetWorkerSet targetWorkerSet = WORKERS_WITH_METADATA;
 
-			SendCommandToWorkers(WORKERS_WITH_METADATA, DISABLE_DDL_PROPAGATION);
+			if (ddlJob->truncateStatment)
+			{
+				/*
+				 * TODO: OTHER_WORKERS is wrong. we should have OTHER_WORKERS_WITH_METADATA
+				 */
+				targetWorkerSet = OTHER_WORKERS_WITH_METADATA;
+			}
+
+			 SendCommandToWorkers(targetWorkerSet, DISABLE_DDL_PROPAGATION);
 
 			/*
 			 * Given that we're relaying the query to the worker nodes directly,
@@ -3158,10 +3319,10 @@ ExecuteDistributedDDLJob(DDLJob *ddlJob)
 			 */
 			if (setSearchPathCommand != NULL)
 			{
-				SendCommandToWorkers(WORKERS_WITH_METADATA, setSearchPathCommand);
+				SendCommandToWorkers(targetWorkerSet, setSearchPathCommand);
 			}
 
-			SendCommandToWorkers(WORKERS_WITH_METADATA, (char *) ddlJob->commandString);
+			SendCommandToWorkers(targetWorkerSet, (char *) ddlJob->commandString);
 		}
 
 		if (MultiShardConnectionType == SEQUENTIAL_CONNECTION ||

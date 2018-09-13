@@ -348,5 +348,4 @@ extern List * QueryPushdownSqlTaskList(Query *query, uint64 jobId,
 									   List *prunedRelationShardList, TaskType taskType,
 									   bool modifyRequiresMasterEvaluation);
 
-
 #endif   /* MULTI_PHYSICAL_PLANNER_H */

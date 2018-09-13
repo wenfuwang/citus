@@ -123,7 +123,7 @@ SendBareCommandListToWorkers(TargetWorkerSet targetWorkerSet, List *commandList)
 			continue;
 		}
 
-		if (targetWorkerSet == OTHER_WORKERS &&
+		if (targetWorkerSet == OTHER_WORKERS_WITH_METADATA &&
 			workerNode->groupId == GetLocalGroupId())
 		{
 			continue;
@@ -176,13 +176,14 @@ SendCommandToWorkersParams(TargetWorkerSet targetWorkerSet, char *command,
 		MultiConnection *connection = NULL;
 		int connectionFlags = 0;
 
-		if (targetWorkerSet == WORKERS_WITH_METADATA &&
+		if ((targetWorkerSet == WORKERS_WITH_METADATA ||
+			 targetWorkerSet == OTHER_WORKERS_WITH_METADATA) &&
 			!workerNode->hasMetadata)
 		{
 			continue;
 		}
 
-		if (targetWorkerSet == OTHER_WORKERS &&
+		if (targetWorkerSet == OTHER_WORKERS_WITH_METADATA &&
 			workerNode->groupId == GetLocalGroupId())
 		{
 			continue;

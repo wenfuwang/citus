@@ -61,13 +61,9 @@
 #include "utils/varlena.h"
 #endif
 
-#define LOCK_RELATION_IF_EXISTS "SELECT lock_relation_if_exists('%s', '%s');"
-#define REMOTE_LOCK_MODE_FOR_TRUNCATE "ACCESS EXCLUSIVE"
-
-
 static List * ModifyMultipleShardsTaskList(Query *query, List *shardIntervalList, TaskType
 										   taskType);
-static bool ShouldExecuteTruncateStmtSequential(TruncateStmt *command);
+
 static LOCKMODE LockModeTextToLockMode(const char *lockModeName);
 
 
@@ -130,33 +126,7 @@ master_modify_multiple_shards(PG_FUNCTION_ARGS)
 	}
 	else if (IsA(queryTreeNode, TruncateStmt))
 	{
-		TruncateStmt *truncateStatement = (TruncateStmt *) queryTreeNode;
-		List *relationList = truncateStatement->relations;
-		RangeVar *rangeVar = NULL;
-
-		if (list_length(relationList) != 1)
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("master_modify_multiple_shards() can truncate only "
-							"one table")));
-		}
-
-		rangeVar = (RangeVar *) linitial(relationList);
-		relationId = RangeVarGetRelid(rangeVar, NoLock, failOK);
-		if (rangeVar->schemaname == NULL)
-		{
-			Oid schemaOid = get_rel_namespace(relationId);
-			char *schemaName = get_namespace_name(schemaOid);
-			rangeVar->schemaname = schemaName;
-		}
-
-		EnsureTablePermissions(relationId, ACL_TRUNCATE);
-
-		if (ShouldExecuteTruncateStmtSequential(truncateStatement))
-		{
-			SetLocalMultiShardModifyModeToSequential();
-		}
+		PG_RETURN_INT32(0);
 	}
 	else
 	{
@@ -187,10 +157,6 @@ master_modify_multiple_shards(PG_FUNCTION_ARGS)
 
 		taskType = MODIFY_TASK;
 	}
-	else
-	{
-		taskType = DDL_TASK;
-	}
 
 	/* reject queries with a returning list */
 	if (list_length(modifyQuery->returningList) > 0)
@@ -211,26 +177,6 @@ master_modify_multiple_shards(PG_FUNCTION_ARGS)
 
 	taskList =
 		ModifyMultipleShardsTaskList(modifyQuery, prunedShardIntervalList, taskType);
-
-	/*
-	 * We lock the relation we're TRUNCATING on the other worker nodes before
-	 * executing the truncate commands on the shards. This is necessary to prevent
-	 * distributed deadlocks where a concurrent operation on the same table (or a
-	 * cascading table) is executed on the other nodes.
-	 *
-	 * Note that we should skip the current node to prevent a self-deadlock that's why
-	 * we use OTHER_WORKERS tag.
-	 */
-	if (truncateOperation && ShouldSyncTableMetadata(relationId))
-	{
-		char *qualifiedRelationName = generate_qualified_relation_name(relationId);
-		StringInfo lockRelation = makeStringInfo();
-
-		appendStringInfo(lockRelation, LOCK_RELATION_IF_EXISTS, qualifiedRelationName,
-						 REMOTE_LOCK_MODE_FOR_TRUNCATE);
-
-		SendCommandToWorkers(OTHER_WORKERS, lockRelation->data);
-	}
 
 	if (MultiShardConnectionType == SEQUENTIAL_CONNECTION)
 	{
@@ -289,34 +235,11 @@ ModifyMultipleShardsTaskList(Query *query, List *shardIntervalList, TaskType tas
 
 
 /*
- * ShouldExecuteTruncateStmtSequential decides if the TRUNCATE stmt needs
- * to run sequential. If so, it calls SetLocalMultiShardModifyModeToSequential().
+ * TODO: Move these functions to a seperate file?
+ * maybe: src/backend/ddl/truncate.c
  *
- * If a reference table which has a foreign key from a distributed table is truncated
- * we need to execute the command sequentially to avoid self-deadlock.
+ * though truncate is not actually a ddl
  */
-static bool
-ShouldExecuteTruncateStmtSequential(TruncateStmt *command)
-{
-	List *relationList = command->relations;
-	ListCell *relationCell = NULL;
-	bool failOK = false;
-
-	foreach(relationCell, relationList)
-	{
-		RangeVar *rangeVar = (RangeVar *) lfirst(relationCell);
-		Oid relationId = RangeVarGetRelid(rangeVar, NoLock, failOK);
-
-		if (IsDistributedTable(relationId) &&
-			PartitionMethod(relationId) == DISTRIBUTE_BY_NONE &&
-			TableReferenced(relationId))
-		{
-			return true;
-		}
-	}
-
-	return false;
-}
 
 
 /*

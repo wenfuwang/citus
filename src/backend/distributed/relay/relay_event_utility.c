@@ -469,7 +469,21 @@ RelayEventExtendNames(Node *parseTree, char *schemaName, uint64 shardId)
 			 * sequences through table column dependencies. As we have not
 			 * determined our dependency model for sequences, we error here.
 			 */
-			ereport(ERROR, (errmsg("cannot extend name for truncate statement")));
+
+			/* ereport(ERROR, (errmsg("cannot extend name for truncate statement"))); */
+			TruncateStmt *truncateStatement = (TruncateStmt *) parseTree;
+			List *relationList = truncateStatement->relations;
+			RangeVar *rangeVar = NULL;
+
+			rangeVar = (RangeVar *) linitial(relationList);
+			Oid relationId = RangeVarGetRelid(rangeVar, NoLock, true);
+			char **objectSchemaName = &(rangeVar->schemaname);
+
+			/* prefix with schema name if it is not added already */
+			SetSchemaNameIfNotExist(objectSchemaName, schemaName);
+
+			/* schema is ignored */
+			AppendShardIdToName(&rangeVar->relname, shardId);
 			break;
 		}
 

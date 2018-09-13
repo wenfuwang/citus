@@ -347,7 +347,7 @@ CreateDistributedTable(Oid relationId, Var *distributionColumn, char distributio
 	/* foreign tables does not support TRUNCATE trigger */
 	if (RegularTable(relationId))
 	{
-		CreateTruncateTrigger(relationId);
+		/* CreateTruncateTrigger(relationId); */
 	}
 
 	/*
