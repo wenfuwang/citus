@@ -391,7 +391,7 @@ StoreAllActiveTransactions(Tuplestorestate *tupleStore, TupleDesc tupleDescripto
 	/* we're reading all distributed transactions, prevent new backends */
 	LockBackendSharedMemory(LW_SHARED);
 
-	for (backendIndex = 0; backendIndex < MaxBackends; ++backendIndex)
+	for (backendIndex = 0; backendIndex < TotalProcs; ++backendIndex)
 	{
 		BackendData *currentBackend =
 			&backendManagementShmemData->backends[backendIndex];
@@ -543,7 +543,7 @@ BackendManagementShmemInit(void)
 		 * We need to init per backend's spinlock before any backend
 		 * starts its execution.
 		 */
-		for (backendIndex = 0; backendIndex < MaxBackends; ++backendIndex)
+		for (backendIndex = 0; backendIndex < TotalProcs; ++backendIndex)
 		{
 			SpinLockInit(&backendManagementShmemData->backends[backendIndex].mutex);
 		}
@@ -568,7 +568,7 @@ BackendManagementShmemSize(void)
 	Size size = 0;
 
 	size = add_size(size, sizeof(BackendManagementShmemData));
-	size = add_size(size, mul_size(sizeof(BackendData), MaxBackends));
+	size = add_size(size, mul_size(sizeof(BackendData), TotalProcs));
 
 	return size;
 }
@@ -845,7 +845,7 @@ ActiveDistributedTransactionNumbers(void)
 	int curBackend = 0;
 
 	/* build list of starting procs */
-	for (curBackend = 0; curBackend < MaxBackends; curBackend++)
+	for (curBackend = 0; curBackend < TotalProcs; curBackend++)
 	{
 		PGPROC *currentProc = &ProcGlobal->allProcs[curBackend];
 		BackendData currentBackendData;

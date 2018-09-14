@@ -381,7 +381,7 @@ AssociateDistributedTransactionWithBackendProc(TransactionNode *transactionNode)
 {
 	int backendIndex = 0;
 
-	for (backendIndex = 0; backendIndex < MaxBackends; ++backendIndex)
+	for (backendIndex = 0; backendIndex < TotalProcs; ++backendIndex)
 	{
 		PGPROC *currentProc = &ProcGlobal->allProcs[backendIndex];
 		BackendData currentBackendData;
