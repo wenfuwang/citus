@@ -528,8 +528,16 @@ FinishRemoteTransactionPrepare(struct MultiConnection *connection)
 		transaction->transactionState = REMOTE_TRANS_PREPARED;
 	}
 
-	result = GetRemoteCommandResult(connection, raiseErrors);
-	Assert(!result);
+	/*
+	 * Try to consume results of any in-progress commands. In the 1PC case
+	 * this is also where we consume the result of the ROLLBACK.
+	 *
+	 * If we don't succeed the connection will be in a bad state, so we close it.
+	 */
+	if (!ClearResults(connection, raiseErrors))
+	{
+		ShutdownConnection(connection);
+	}
 }
 
 
