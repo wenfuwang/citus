@@ -57,10 +57,17 @@ SELECT master_get_active_worker_nodes();
 -- try to disable a node which does not exist and see that an error is thrown
 SELECT master_disable_node('localhost.noexist', 2345);
 
--- try to disable a node via non-super user
+-- try to manipulate node metadata via non-super user
 CREATE USER non_super_user;
 \c - non_super_user - :master_port
-SELECT master_disable_node('localhost', :worker_1_port);
+SELECT master_activate_node('localhost', :worker_2_port);
+SELECT master_add_inactive_node('localhost', :worker_2_port + 1);
+SELECT master_add_node('localhost', :worker_2_port + 1);
+SELECT master_add_secondary_node('localhost', :worker_2_port + 1, 'localhost', :worker_2_port);
+SELECT master_initialize_node_metadata();
+SELECT master_remove_node('localhost', :worker_2_port);
+SELECT master_update_node(nodeid, 'localhost', :worker_2_port + 1) FROM pg_dist_node WHERE nodeport = :worker_2_port;
+
 \c - postgres - :master_port
 SELECT master_get_active_worker_nodes();
 
