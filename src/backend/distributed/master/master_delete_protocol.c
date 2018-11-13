@@ -58,6 +58,7 @@
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
+#include "utils/varlena.h"
 
 
 /* Local functions forward declarations */
@@ -268,12 +269,13 @@ master_drop_sequences(PG_FUNCTION_ARGS)
 	Datum sequenceText = 0;
 	bool isNull = false;
 	StringInfo dropSeqCommand = makeStringInfo();
-	bool coordinator = IsCoordinator();
 
 	CheckCitusVersion(ERROR);
 
-	/* do nothing if DDL propagation is switched off or this is not the coordinator */
-	if (!EnableDDLPropagation || !coordinator)
+	EnsureCoordinator();
+
+	/* do nothing if DDL propagation is switched off */
+	if (!EnableDDLPropagation)
 	{
 		PG_RETURN_VOID();
 	}
@@ -282,6 +284,13 @@ master_drop_sequences(PG_FUNCTION_ARGS)
 	sequenceIterator = array_create_iterator(sequenceNamesArray, 0, NULL);
 	while (array_iterate(sequenceIterator, &sequenceText, &isNull))
 	{
+		char *schemaName = NULL;
+		char *sequenceName = NULL;
+		Oid sequenceOid = InvalidOid;
+		Oid schemaOid = InvalidOid;
+		List *sequenceQualifiedNameList =
+			textToQualifiedNameList(DatumGetTextP(sequenceText));
+
 		if (isNull)
 		{
 			ereport(ERROR, (errmsg("unexpected NULL sequence name"),
@@ -298,6 +307,28 @@ master_drop_sequences(PG_FUNCTION_ARGS)
 			/* otherwise, add a comma to separate subsequent sequence names */
 			appendStringInfoChar(dropSeqCommand, ',');
 		}
+
+		DeconstructQualifiedName(sequenceQualifiedNameList, &schemaName, &sequenceName);
+		if (schemaName == NULL)
+		{
+			ereport(ERROR, (errmsg("unexpected sequence schema"),
+							errcode(ERRCODE_INVALID_PARAMETER_VALUE)));
+		}
+
+		schemaOid = get_namespace_oid(schemaName, false);
+		sequenceOid = get_relname_relid(sequenceName, schemaOid);
+		if (sequenceOid == InvalidOid)
+		{
+			ereport(ERROR, (errmsg("unexpected sequence name"),
+							errcode(ERRCODE_INVALID_PARAMETER_VALUE)));
+		}
+
+		/*
+		 * Ensure that the current user can drop the sequence. Otherwise, below
+		 * we use SendCommandToWorkers() to drop the sequence, which connects with
+		 * superuser, so able to drop anything.
+		 */
+		CheckTableSchemaNameForDrop(sequenceOid, &schemaName, &sequenceName);
 
 		appendStringInfo(dropSeqCommand, " %s", TextDatumGetCString(sequenceText));
 	}

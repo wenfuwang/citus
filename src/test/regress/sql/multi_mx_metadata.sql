@@ -10,7 +10,8 @@ TRUNCATE pg_dist_transaction;
 
 CREATE TABLE distributed_mx_table (
     key text primary key,
-    value jsonb
+    value jsonb,
+    some_val bigserial
 );
 CREATE INDEX ON distributed_mx_table USING GIN (value);
 
@@ -185,12 +186,27 @@ DROP TABLE distributed_mx_table;
 SELECT master_remove_distributed_table_metadata_from_workers('distributed_mx_table'::regclass, 'public', 'distributed_mx_table');
 SELECT master_drop_all_shards('distributed_mx_table'::regclass, 'public', 'distributed_mx_table');
 SELECT master_remove_partition_metadata('distributed_mx_table'::regclass, 'public', 'distributed_mx_table');
+SELECT master_drop_sequences(ARRAY['public.distributed_mx_table_some_val_seq']);
+SELECT master_drop_sequences(ARRAY['public.distributed_mx_table_some_val_seq_not_existing']);
+SELECT master_drop_sequences(ARRAY['public.']);
+SELECT master_drop_sequences(ARRAY['distributed_mx_table_some_val_seq']);
+SELECT master_drop_sequences(ARRAY['non_existing_schema.distributed_mx_table_some_val_seq']);
+SELECT master_drop_sequences(ARRAY['']);
+
+-- doesn't error out but it has no effect, so no need to error out
+SELECT master_drop_sequences(NULL);
+
+\c - postgres - :master_port
+
+-- finally make sure that the sequence remains
+SELECT "Column", "Type", "Modifiers" FROM table_desc WHERE relid='distributed_mx_table'::regclass;
 
 \c - no_access_mx - :worker_1_port
 DROP TABLE distributed_mx_table;
 SELECT master_remove_distributed_table_metadata_from_workers('distributed_mx_table'::regclass, 'public', 'distributed_mx_table');
 SELECT master_drop_all_shards('distributed_mx_table'::regclass, 'public', 'distributed_mx_table');
 SELECT master_remove_partition_metadata('distributed_mx_table'::regclass, 'public', 'distributed_mx_table');
+SELECT master_drop_sequences(ARRAY['public.distributed_mx_table_some_val_seq']);
 
 -- Resume ordinary recovery
 \c - postgres - :master_port

@@ -12,7 +12,8 @@ SELECT pg_reload_conf();
 TRUNCATE pg_dist_transaction;
 CREATE TABLE distributed_mx_table (
     key text primary key,
-    value jsonb
+    value jsonb,
+    some_val bigserial
 );
 CREATE INDEX ON distributed_mx_table USING GIN (value);
 SET citus.shard_replication_factor TO 1;
@@ -47,11 +48,12 @@ SELECT count(*) FROM pg_dist_transaction;
 
 \c - - - :worker_1_port
 SELECT "Column", "Type", "Modifiers" FROM table_desc WHERE relid='distributed_mx_table'::regclass;
- Column | Type  | Modifiers 
---------+-------+-----------
- key    | text  | not null
- value  | jsonb | 
-(2 rows)
+  Column  |  Type  |                                Modifiers                                
+----------+--------+-------------------------------------------------------------------------
+ key      | text   | not null
+ value    | jsonb  | 
+ some_val | bigint | not null default nextval('distributed_mx_table_some_val_seq'::regclass)
+(3 rows)
 
 SELECT "Column", "Type", "Definition" FROM index_attrs WHERE
     relid = 'distributed_mx_table_pkey'::regclass;
@@ -83,11 +85,12 @@ WHERE logicalrelid = 'distributed_mx_table'::regclass;
 
 \c - - - :worker_2_port
 SELECT "Column", "Type", "Modifiers" FROM table_desc WHERE relid='distributed_mx_table'::regclass;
- Column | Type  | Modifiers 
---------+-------+-----------
- key    | text  | not null
- value  | jsonb | 
-(2 rows)
+  Column  |  Type  |                                Modifiers                                
+----------+--------+-------------------------------------------------------------------------
+ key      | text   | not null
+ value    | jsonb  | 
+ some_val | bigint | not null default nextval('distributed_mx_table_some_val_seq'::regclass)
+(3 rows)
 
 SELECT "Column", "Type", "Definition" FROM index_attrs WHERE
     relid = 'distributed_mx_table_pkey'::regclass;
@@ -307,6 +310,35 @@ SELECT master_drop_all_shards('distributed_mx_table'::regclass, 'public', 'distr
 ERROR:  must be owner of table distributed_mx_table
 SELECT master_remove_partition_metadata('distributed_mx_table'::regclass, 'public', 'distributed_mx_table');
 ERROR:  must be owner of table distributed_mx_table
+SELECT master_drop_sequences(ARRAY['public.distributed_mx_table_some_val_seq']);
+ERROR:  must be owner of table distributed_mx_table_some_val_seq
+SELECT master_drop_sequences(ARRAY['public.distributed_mx_table_some_val_seq_not_existing']);
+ERROR:  unexpected sequence name
+SELECT master_drop_sequences(ARRAY['public.']);
+ERROR:  invalid name syntax
+SELECT master_drop_sequences(ARRAY['distributed_mx_table_some_val_seq']);
+ERROR:  unexpected sequence schema
+SELECT master_drop_sequences(ARRAY['non_existing_schema.distributed_mx_table_some_val_seq']);
+ERROR:  schema "non_existing_schema" does not exist
+SELECT master_drop_sequences(ARRAY['']);
+ERROR:  invalid name syntax
+-- doesn't error out but it has no effect, so no need to error out
+SELECT master_drop_sequences(NULL);
+ master_drop_sequences 
+-----------------------
+ 
+(1 row)
+
+\c - postgres - :master_port
+-- finally make sure that the sequence remains
+SELECT "Column", "Type", "Modifiers" FROM table_desc WHERE relid='distributed_mx_table'::regclass;
+  Column  |  Type  |                                Modifiers                                
+----------+--------+-------------------------------------------------------------------------
+ key      | text   | not null
+ value    | jsonb  | 
+ some_val | bigint | not null default nextval('distributed_mx_table_some_val_seq'::regclass)
+(3 rows)
+
 \c - no_access_mx - :worker_1_port
 DROP TABLE distributed_mx_table;
 ERROR:  must be owner of table distributed_mx_table
@@ -316,6 +348,9 @@ SELECT master_drop_all_shards('distributed_mx_table'::regclass, 'public', 'distr
 ERROR:  operation is not allowed on this node
 HINT:  Connect to the coordinator and run it again.
 SELECT master_remove_partition_metadata('distributed_mx_table'::regclass, 'public', 'distributed_mx_table');
+ERROR:  operation is not allowed on this node
+HINT:  Connect to the coordinator and run it again.
+SELECT master_drop_sequences(ARRAY['public.distributed_mx_table_some_val_seq']);
 ERROR:  operation is not allowed on this node
 HINT:  Connect to the coordinator and run it again.
 -- Resume ordinary recovery
